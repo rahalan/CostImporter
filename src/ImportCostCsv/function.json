@@ -1,0 +1,13 @@
+{
+  "bindings": [
+    {
+      "name": "InputBlob",
+      "type": "blobTrigger",
+      "direction": "in",
+      "path": "%CostBlobContainer%/{name}",
+      "connection": "CostStorage",
+      "source": "EventGrid",
+      "dataType": "stream"
+    }
+  ]
+}

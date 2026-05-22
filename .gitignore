@@ -1,0 +1,10 @@
+bin
+obj
+.vs
+.vscode
+local.settings.json
+*.user
+.azure
+__azurite_db*.json
+__blobstorage__
+__queuestorage__

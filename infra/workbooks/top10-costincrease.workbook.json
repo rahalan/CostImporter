@@ -1,0 +1,143 @@
+{
+  "version": "Notebook/1.0",
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# 💸 Top 10 Resource Groups — Cost Increase vs Last Month\n\nSurfaces the **10 resource groups with the largest absolute cost increase** in the current billing month compared to the previous one.  \nData source: `AzureCosts_CL` (ingested by the CostImporter Azure Function).\n\n> **Note:** Comparison uses `BillingPeriodStartDate` (when the cost was *incurred*), not ingestion time."
+      },
+      "name": "header"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "crossComponentResources": ["{Subscription}"],
+        "parameters": [
+          {
+            "id": "param-subscription",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscription",
+            "label": "Subscription",
+            "type": 6,
+            "isRequired": true,
+            "multiSelect": false,
+            "value": null,
+            "typeSettings": {
+              "additionalResourceOptions": ["value::1"],
+              "includeAll": false
+            },
+            "timeContext": { "durationMs": 0 }
+          },
+          {
+            "id": "param-workspace",
+            "version": "KqlParameterItem/1.0",
+            "name": "Workspace",
+            "label": "Log Analytics Workspace",
+            "type": 5,
+            "isRequired": true,
+            "multiSelect": false,
+            "value": null,
+            "query": "Resources\n| where type == 'microsoft.operationalinsights/workspaces'\n| project id, name\n| order by name asc",
+            "crossComponentResources": ["{Subscription}"],
+            "typeSettings": {
+              "resourceTypeFilter": {
+                "microsoft.operationalinsights/workspaces": true
+              },
+              "additionalResourceOptions": []
+            },
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          }
+        ]
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n### Table — absolute & percentage increase"
+      },
+      "name": "section-table"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let thisMonth    = startofmonth(now());\nlet lastMonth    = startofmonth(datetime_add('month', -1, now()));\nlet currency     = toscalar(\n    AzureCosts_CL\n    | where isnotempty(Currency)\n    | take 1\n    | project Currency);\nlet currentCosts =\n    AzureCosts_CL\n    | where BillingPeriodStartDate >= thisMonth\n    | where isnotempty(ResourceGroupName)\n    | summarize\n        CurrentCost = sum(todouble(CostInBillingCurrency))\n        by ResourceGroupName, SubscriptionName;\nlet previousCosts =\n    AzureCosts_CL\n    | where BillingPeriodStartDate >= lastMonth\n          and BillingPeriodStartDate < thisMonth\n    | where isnotempty(ResourceGroupName)\n    | summarize\n        PreviousCost = sum(todouble(CostInBillingCurrency))\n        by ResourceGroupName, SubscriptionName;\ncurrentCosts\n| join kind=fullouter previousCosts on ResourceGroupName\n| extend\n    ResourceGroupName = coalesce(ResourceGroupName, ResourceGroupName1),\n    SubscriptionName  = coalesce(SubscriptionName,  SubscriptionName1)\n| project-away ResourceGroupName1, SubscriptionName1\n| extend\n    CurrentCost  = coalesce(CurrentCost,  0.0),\n    PreviousCost = coalesce(PreviousCost, 0.0)\n| extend\n    CostIncrease    = CurrentCost - PreviousCost,\n    IncreasePercent = iff(\n        PreviousCost > 0,\n        round((CurrentCost - PreviousCost) / PreviousCost * 100, 1),\n        real(null))\n| where CostIncrease > 0\n| top 10 by CostIncrease desc\n| project\n    ['Resource Group'] = ResourceGroupName,\n    Subscription       = SubscriptionName,\n    ['Last Month']     = round(PreviousCost, 2),\n    ['This Month']     = round(CurrentCost, 2),\n    ['Δ Cost']         = round(CostIncrease, 2),\n    ['Δ %']            = IncreasePercent,\n    Currency           = currency",
+        "size": 0,
+        "title": "Top 10 Resource Groups by Cost Increase",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{Workspace}"],
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Last Month",
+              "formatter": 0,
+              "numberFormat": { "unit": 0, "options": { "style": "decimal", "minimumFractionDigits": 2, "maximumFractionDigits": 2 } }
+            },
+            {
+              "columnMatch": "This Month",
+              "formatter": 0,
+              "numberFormat": { "unit": 0, "options": { "style": "decimal", "minimumFractionDigits": 2, "maximumFractionDigits": 2 } }
+            },
+            {
+              "columnMatch": "Δ Cost",
+              "formatter": 8,
+              "formatOptions": { "palette": "redGreen", "customColumnWidthSetting": "120px" },
+              "numberFormat": { "unit": 0, "options": { "style": "decimal", "minimumFractionDigits": 2, "maximumFractionDigits": 2 } }
+            },
+            {
+              "columnMatch": "Δ %",
+              "formatter": 5,
+              "formatOptions": { "palette": "redGreen" },
+              "numberFormat": { "unit": 1, "options": { "style": "decimal", "minimumFractionDigits": 1, "maximumFractionDigits": 1 } }
+            },
+            {
+              "columnMatch": "Currency",
+              "formatter": 1
+            }
+          ],
+          "sortBy": [{ "itemKey": "Δ Cost", "sortOrder": 2 }]
+        },
+        "tileSettings": { "showBorder": false }
+      },
+      "name": "query-table"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "---\n### Chart — cost increase by resource group"
+      },
+      "name": "section-chart"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let thisMonth    = startofmonth(now());\nlet lastMonth    = startofmonth(datetime_add('month', -1, now()));\nlet currentCosts =\n    AzureCosts_CL\n    | where BillingPeriodStartDate >= thisMonth\n    | where isnotempty(ResourceGroupName)\n    | summarize CurrentCost = sum(todouble(CostInBillingCurrency)) by ResourceGroupName;\nlet previousCosts =\n    AzureCosts_CL\n    | where BillingPeriodStartDate >= lastMonth\n          and BillingPeriodStartDate < thisMonth\n    | where isnotempty(ResourceGroupName)\n    | summarize PreviousCost = sum(todouble(CostInBillingCurrency)) by ResourceGroupName;\ncurrentCosts\n| join kind=fullouter previousCosts on ResourceGroupName\n| extend\n    ResourceGroupName = coalesce(ResourceGroupName, ResourceGroupName1)\n| project-away ResourceGroupName1\n| extend\n    CurrentCost  = coalesce(CurrentCost,  0.0),\n    PreviousCost = coalesce(PreviousCost, 0.0)\n| extend CostIncrease = CurrentCost - PreviousCost\n| where CostIncrease > 0\n| top 10 by CostIncrease desc\n| project ResourceGroupName, ['Last Month'] = round(PreviousCost, 2), ['This Month'] = round(CurrentCost, 2)",
+        "size": 0,
+        "title": "Current vs Previous Month Cost (Top 10 by Increase)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["{Workspace}"],
+        "visualization": "categoricalbar",
+        "chartSettings": {
+          "xAxis": "ResourceGroupName",
+          "yAxis": ["Last Month", "This Month"],
+          "seriesLabelSettings": [
+            { "seriesName": "Last Month", "color": "blue"   },
+            { "seriesName": "This Month", "color": "orange" }
+          ],
+          "xAxisWasFloat": false
+        }
+      },
+      "name": "query-chart"
+    }
+  ],
+  "styleSettings": {},
+  "fromTemplateId": ""
+}

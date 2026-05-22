@@ -1,0 +1,64 @@
+// ============================================================
+// Top 10 Resource Groups — Highest Cost Increase vs Last Month
+// ============================================================
+// Uses the AzureCosts_CL custom table populated by the
+// ImportCostCsv Azure Function.
+//
+// Compares total cost per resource group for the current billing
+// month against the previous billing month, then surfaces the
+// 10 groups with the largest absolute cost increase.
+//
+// Note: Filtering is done on BillingPeriodStartDate (the date the
+//       cost was *incurred*), not TimeGenerated (ingestion time).
+// ============================================================
+
+let thisMonth    = startofmonth(now());
+let lastMonth    = startofmonth(datetime_add('month', -1, now()));
+let currency     = toscalar(
+    AzureCosts_CL
+    | where isnotempty(Currency)
+    | take 1
+    | project Currency);
+
+let currentCosts =
+    AzureCosts_CL
+    | where BillingPeriodStartDate >= thisMonth
+    | where isnotempty(ResourceGroupName)
+    | summarize
+        CurrentCost = sum(todouble(CostInBillingCurrency))
+        by ResourceGroupName, SubscriptionName;
+
+let previousCosts =
+    AzureCosts_CL
+    | where BillingPeriodStartDate >= lastMonth
+          and BillingPeriodStartDate < thisMonth
+    | where isnotempty(ResourceGroupName)
+    | summarize
+        PreviousCost = sum(todouble(CostInBillingCurrency))
+        by ResourceGroupName, SubscriptionName;
+
+currentCosts
+| join kind=fullouter previousCosts on ResourceGroupName
+| extend
+    ResourceGroupName = coalesce(ResourceGroupName, ResourceGroupName1),
+    SubscriptionName  = coalesce(SubscriptionName,  SubscriptionName1)
+| project-away ResourceGroupName1, SubscriptionName1
+| extend
+    CurrentCost  = coalesce(CurrentCost,  0.0),
+    PreviousCost = coalesce(PreviousCost, 0.0)
+| extend
+    CostIncrease    = CurrentCost - PreviousCost,
+    IncreasePercent = iff(
+        PreviousCost > 0,
+        round((CurrentCost - PreviousCost) / PreviousCost * 100, 1),
+        real(null))
+| where CostIncrease > 0
+| top 10 by CostIncrease desc
+| project
+    ['Resource Group'] = ResourceGroupName,
+    Subscription       = SubscriptionName,
+    ['Last Month']     = round(PreviousCost, 2),
+    ['This Month']     = round(CurrentCost, 2),
+    ['Δ Cost']         = round(CostIncrease, 2),
+    ['Δ %']            = IncreasePercent,
+    Currency           = currency
